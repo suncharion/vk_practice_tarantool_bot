@@ -3,46 +3,36 @@ package main
 import (
 	"fmt"
 	"go_bot_tg2/bot"
+	"log"
 	"strings"
 	"time"
 )
 
-var passwords map[string]string = map[string]string{}
-
 func main() {
+	// инициализируем бота
 	tgbot := bot.NewBot()
+
+	// пингуем API
 	_, err := tgbot.GetMe()
 	if err != nil {
 		fmt.Println(err)
+		log.Fatal("Cannot ping Telegram API")
 	}
 	// основной бесконечный цикл приложения
 	for {
+		// получаем обновления
 		updates, err := tgbot.GetUpdates()
 		if err != nil {
 			fmt.Println(err)
 		}
-		// /start
+
+		// обрабатываем обновления, если они есть
 		for _, update := range updates.Result {
-			fmt.Printf("update: %+v\n", update)
-			fmt.Println("cbdata", update.CallbackQuery.Data)
-
-			/*if update.CallbackQuery.Data == "pos4" {
-
-				var keyboard []*bot.TgKeyboardButton
-				keyboard = append(keyboard, bot.NewBot().NewKeyboard("Ваша реклама", "https://vk.com", ""))
-				keyboard = append(keyboard, bot.NewBot().NewKeyboard("Ваша реклама", "https://vk.com", ""))
-				keyboard = append(keyboard, bot.NewBot().NewKeyboard("назад", "", "/start"))
-				tgbot.SendMessage(update.CallbackQuery.Message.Chat.Id, "Ваша реклама", keyboard)
-
-			} */
-
-			/*
-			 /set github password
-			*/
+			// разбиваем входящее сообщение на слова
 			messageParts := strings.Split(update.Message.Text, " ")
-			fmt.Println("message parts", messageParts)
 
-			if update.Message.Text == "/start" || update.CallbackQuery.Data == "/start" {
+			if update.Message.Text == "/start" || update.CallbackQuery.Data == "/start" { // приветствие пользователя
+				// в зависимости от того, пришел пользватель с кнопки inline-клавиатуры или встроенной, ищем chatId в соответствующих местах
 				var chatId int
 				if update.Message.Text != "" {
 					chatId = update.Message.Chat.Id
@@ -50,51 +40,67 @@ func main() {
 					chatId = update.CallbackQuery.Message.Chat.Id
 				}
 
+				if chatId == 0 {
+					fmt.Println("Cannot get chat id for message")
+				}
+
 				_, err := tgbot.SendMessage(chatId, "Менеджер паролей \n Доступные команды: /set /get /del \n Формат ввода команд : \n /set service password \n /get service \n /del service", nil)
 				if err != nil {
 					fmt.Println(err)
 				}
-			} else if messageParts[0] == "/set" {
-				// /set github qweqweqwe
+			} else if messageParts[0] == "/set" { // сохраняем пароль
 				if len(messageParts) != 3 {
 					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
 					continue
 				}
 
+				err = tgbot.Set(update.Message.Chat.Id, messageParts[1], messageParts[2])
+				if err != nil {
+					fmt.Println(err)
+					tgbot.SendMessage(update.Message.Chat.Id, "Произошла ошибка при сохранении пароля. ", nil)
+					continue
+				}
 				_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Сохраняем пароль для сервиса "+messageParts[1], nil)
-				passwords[messageParts[1]] = messageParts[2]
-			} else if messageParts[0] == "/get" {
+			} else if messageParts[0] == "/get" { // получаем пароль
 				if len(messageParts) != 2 {
 					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
 					continue
 				}
-				val, ok := passwords[messageParts[1]]
-				if !ok {
+				val, err := tgbot.Get(update.Message.Chat.Id, messageParts[1])
+				if err != nil {
+					fmt.Println(err)
 					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Пароль для сервиса "+messageParts[1]+" не найден", nil)
 					continue
 				}
-				tgbot.SendMessage(update.Message.Chat.Id, "Ваш пароль от сервиса, "+messageParts[1]+" : \n"+val, nil)
-			} else if messageParts[0] == "/del" {
+				answer, err := tgbot.SendMessage(update.Message.Chat.Id, "Ваш пароль от сервиса "+messageParts[1]+" : \n"+val, nil)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+				fmt.Printf("%+v", answer)
+				if answer.Ok {
+					fmt.Println("deleting msg", answer.Message.Chat.Id, answer.Message.MessageId)
+					go tgbot.DeleteMessage(update.Message.Chat.Id, answer.Message.MessageId)
+				}
+			} else if messageParts[0] == "/del" { // удаляем пароль
 				if len(messageParts) != 2 {
 					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
 					continue
 				}
-				_, ok := passwords[messageParts[1]]
-				if !ok {
+				err = tgbot.Del(update.Message.Chat.Id, messageParts[1])
+				if err != nil {
+					fmt.Println(err)
 					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Имя сервиса "+messageParts[1]+" не найдено", nil)
 					continue
 				}
-				delete(passwords, messageParts[1])
 				tgbot.SendMessage(update.Message.Chat.Id, "Сервис "+messageParts[1]+" удалён ", nil)
-
 			} else {
 				tgbot.SendMessage(update.Message.Chat.Id, "Введите /start для запуска бота", nil)
 			}
-			// callback_query
-			// /get github
 
 		}
 
+		// опрос идет через long polling, поэтому основной цикл надо притормаживать на 1 сек, чтобы он не закидывал API запросами
 		time.Sleep(time.Second * 1)
 	}
 }

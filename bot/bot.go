@@ -2,11 +2,16 @@ package bot
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -16,11 +21,22 @@ const (
 
 type Bot struct {
 	lastUpdate int
+	db         *pgx.Conn
 }
 
 func NewBot() *Bot {
 	fmt.Println("new bot")
-	return &Bot{}
+	bot := &Bot{}
+
+	conn, err := pgx.Connect(context.Background(), "postgres://postgres@90.156.210.232:5432/passwords?password=example")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	bot.db = conn
+	fmt.Println("Database connection established")
+
+	return bot
 }
 
 type TgKeyboardButton struct {
@@ -28,8 +44,6 @@ type TgKeyboardButton struct {
 	Url          string `json:"url"`
 	CallbackData string `json:"callback_data"`
 }
-
-// types of data for updates
 
 type GetUpdatesAnswer struct {
 	Ok     bool
@@ -58,7 +72,8 @@ type TelegramChat struct {
 }
 
 type MessageAnswer struct {
-	Ok bool
+	Ok      bool
+	Message TelegramMessage `json:"result"`
 }
 
 type CallbackQuery struct {
@@ -68,7 +83,42 @@ type CallbackQuery struct {
 	Data    string
 }
 
-// map[string]interface{} !!!
+// отправляет в БД значения паролей
+func (b *Bot) Set(user int, service, pass string) error {
+	tmp, err := b.db.Query(context.Background(), "insert into passwords (user_id, service, password) values ($1, $2, $3)", user, service, pass)
+	tmp.Close()
+	return err
+}
+
+// получает из БД значения паролей
+func (b *Bot) Get(user int, service string) (string, error) {
+	pass := ""
+	err := b.db.QueryRow(context.Background(), "select password from passwords where user_id = $1 and service = $2 order by id desc limit 1", user, service).Scan(&pass)
+	if err != nil {
+		return "", err
+	}
+	return pass, nil
+}
+
+// удаляет из БД значения паролей
+func (b *Bot) Del(user int, service string) error {
+	rows, err := b.db.Query(context.Background(), "delete from passwords where user_id = $1 and service = $2", user, service)
+	if err != nil {
+		return err
+	}
+	rows.Close()
+	return nil
+}
+
+func (b *Bot) DeleteMessage(chatId, messageId int) {
+	time.Sleep(time.Second * 10)
+	_, _ = b.Query("deleteMessage", "POST", map[string]interface{}{
+		"chat_id":    chatId,
+		"message_id": messageId,
+	})
+}
+
+// совершает запросы методов апи телеграм
 func (b *Bot) Query(method string, methodtype string, data map[string]interface{}) (string, error) {
 	var resultRaw *http.Response
 	var err error
@@ -80,8 +130,6 @@ func (b *Bot) Query(method string, methodtype string, data map[string]interface{
 	} else {
 		resultRaw, err = http.Post(apiUrl+apiKey+"/"+method, "application/json", dataReader)
 	}
-
-	//		resp, err = http.Post(endpoint, "application/json", dataReader)
 
 	if err != nil {
 		return "", err
@@ -108,7 +156,7 @@ func (a *Bot) GetUpdates() (*GetUpdatesAnswer, error) {
 	return &parsed, nil
 }
 
-// // отправка сообщений
+// отправка сообщений
 func (c *Bot) SendMessage(chat_id int, text string, keyboard []*TgKeyboardButton) (*MessageAnswer, error) {
 	data := map[string]interface{}{
 		"chat_id": chat_id,
@@ -135,6 +183,7 @@ func (c *Bot) SendMessage(chat_id int, text string, keyboard []*TgKeyboardButton
 	return &parsed, nil
 }
 
+// инициализируем объект клавиатуры
 func (d *Bot) NewKeyboard(text, url, cbdata string) *TgKeyboardButton {
 	return &TgKeyboardButton{
 		Text:         text,
