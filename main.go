@@ -84,7 +84,7 @@ func main() {
 				}
 			} else if messageParts[0] == "/del" { // удаляем пароль
 				if len(messageParts) != 2 {
-					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
+					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды бота", nil)
 					continue
 				}
 				err = tgbot.Del(update.Message.Chat.Id, messageParts[1])
