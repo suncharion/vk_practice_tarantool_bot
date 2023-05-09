@@ -69,7 +69,7 @@ func main() {
 				val, err := tgbot.Get(update.Message.Chat.Id, messageParts[1])
 				if err != nil {
 					fmt.Println(err)
-					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Пароль для сервиса "+messageParts[1]+" не найден", nil)
+					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Пароль для сервиса "+messageParts[1]+" не найден.", nil)
 					continue
 				}
 				answer, err := tgbot.SendMessage(update.Message.Chat.Id, "Ваш пароль от сервиса "+messageParts[1]+" : \n"+val, nil)
@@ -84,7 +84,7 @@ func main() {
 				}
 			} else if messageParts[0] == "/del" { // удаляем пароль
 				if len(messageParts) != 2 {
-					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды бота", nil)
+					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
 					continue
 				}
 				err = tgbot.Del(update.Message.Chat.Id, messageParts[1])
