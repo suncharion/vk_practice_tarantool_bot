@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -84,7 +86,12 @@ type CallbackQuery struct {
 
 // отправляет в БД значения паролей
 func (b *Bot) Set(user int, service, pass string) error {
-	tmp, err := b.db.Query(context.Background(), "insert into passwords (user_id, service, password) values ($1, $2, $3)", user, service, pass)
+	tmp, err := b.db.Query(context.Background(), "delete from passwords where user_id = $1 and service = $2", user, service)
+	tmp.Close()
+	if err != nil {
+		return err
+	}
+	tmp, err = b.db.Query(context.Background(), "insert into passwords (user_id, service, password) values ($1, $2, $3)", user, service, pass)
 	tmp.Close()
 	return err
 }
@@ -117,6 +124,95 @@ func (b *Bot) DeleteMessage(chatId, messageId int) {
 	})
 }
 
+func (b *Bot) UpdateWebhook(w http.ResponseWriter, req *http.Request) {
+	data, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		fmt.Println("Error reading webhook data", err)
+	}
+	fmt.Println("webhook update", string(data))
+	var update TelegramUpdate
+	err = json.Unmarshal([]byte(data), &update)
+	if err != nil {
+		fmt.Println("Cannot parse JSON in update")
+		return
+	}
+
+	// обрабатываем обновления, если они есть
+
+	// разбиваем входящее сообщение на слова
+	messageParts := strings.Split(update.Message.Text, " ")
+
+	if update.Message.Text == "/start" || update.CallbackQuery.Data == "/start" { // приветствие пользователя
+		// в зависимости от того, пришел пользватель с кнопки inline-клавиатуры или встроенной, ищем chatId в соответствующих местах
+		var chatId int
+		if update.Message.Text != "" {
+			chatId = update.Message.Chat.Id
+		} else {
+			chatId = update.CallbackQuery.Message.Chat.Id
+		}
+
+		if chatId == 0 {
+			fmt.Println("Cannot get chat id for message")
+		}
+
+		_, err := b.SendMessage(chatId, "Менеджер паролей \n Доступные команды: /set /get /del \n Формат ввода команд : \n /set service password \n /get service \n /del service", nil)
+		if err != nil {
+			fmt.Println(err)
+		}
+	} else if messageParts[0] == "/set" { // сохраняем пароль
+		if len(messageParts) != 3 {
+			_, _ = b.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
+			return
+		}
+
+		err = b.Set(update.Message.Chat.Id, messageParts[1], messageParts[2])
+		if err != nil {
+			fmt.Println(err)
+			b.SendMessage(update.Message.Chat.Id, "Произошла ошибка при сохранении пароля. ", nil)
+			return
+		}
+		_, _ = b.SendMessage(update.Message.Chat.Id, "Сохранён пароль для сервиса "+messageParts[1], nil)
+		go b.DeleteMessage(update.Message.Chat.Id, update.Message.MessageId)
+
+	} else if messageParts[0] == "/get" { // получаем пароль
+		if len(messageParts) != 2 {
+			_, _ = b.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
+			return
+		}
+		val, err := b.Get(update.Message.Chat.Id, messageParts[1])
+		if err != nil {
+			fmt.Println(err)
+			_, _ = b.SendMessage(update.Message.Chat.Id, "Пароль для сервиса "+messageParts[1]+" не найден.", nil)
+			return
+		}
+		answer, err := b.SendMessage(update.Message.Chat.Id, "Ваш пароль от сервиса "+messageParts[1]+" : \n"+val, nil)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Printf("%+v", answer)
+		if answer.Ok {
+			fmt.Println("deleting msg", answer.Message.Chat.Id, answer.Message.MessageId)
+			go b.DeleteMessage(update.Message.Chat.Id, answer.Message.MessageId)
+		}
+	} else if messageParts[0] == "/del" { // удаляем пароль
+		if len(messageParts) != 2 {
+			_, _ = b.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
+			return
+		}
+		err = b.Del(update.Message.Chat.Id, messageParts[1])
+		if err != nil {
+			fmt.Println(err)
+			_, _ = b.SendMessage(update.Message.Chat.Id, "Имя сервиса "+messageParts[1]+" не найдено", nil)
+			return
+		}
+		b.SendMessage(update.Message.Chat.Id, "Сервис "+messageParts[1]+" удалён ", nil)
+	} else {
+		b.SendMessage(update.Message.Chat.Id, "Введите /start для запуска бота", nil)
+	}
+
+}
+
 // совершает запросы методов апи телеграм
 func (b *Bot) Query(method string, methodtype string, data map[string]interface{}) (string, error) {
 	var resultRaw *http.Response
@@ -141,6 +237,7 @@ func (a *Bot) GetMe() (string, error) {
 	return result, nil
 }
 
+// long polling версия, не используется
 func (a *Bot) GetUpdates() (*GetUpdatesAnswer, error) {
 	result, _ := a.Query("getUpdates?offset="+strconv.Itoa(a.lastUpdate), "GET", map[string]interface{}{})
 	var parsed GetUpdatesAnswer
