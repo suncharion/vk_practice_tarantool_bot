@@ -20,7 +20,7 @@ func main() {
 
 	// запускаем https сервер для вебхука с самоподписанным сертификатом
 	http.HandleFunc("/tgwebhook2", tgbot.UpdateWebhook)
-	err = http.ListenAndServeTLS(":443", "../YOURPUBLIC.pem", "../YOURPRIVATE.key", nil)
+	err = http.ListenAndServeTLS(":443", "YOURPUBLIC.pem", "YOURPRIVATE.key", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
