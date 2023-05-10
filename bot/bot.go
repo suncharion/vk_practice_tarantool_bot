@@ -85,18 +85,21 @@ type CallbackQuery struct {
 }
 
 // отправляет в БД значения паролей
+// пароли сохраняются нешифрованными, т.к. это тестовое задание, но в целом это
+// очень плохо и в продакшене так делать нельзя
 func (b *Bot) Set(user int, service, pass string) error {
-	tmp, err := b.db.Query(context.Background(), "delete from passwords where user_id = $1 and service = $2", user, service)
-	tmp.Close()
-	if err != nil {
-		return err
-	}
-	tmp, err = b.db.Query(context.Background(), "insert into passwords (user_id, service, password) values ($1, $2, $3)", user, service, pass)
+	tmp, err := b.db.Query(context.Background(), `insert into 
+		passwords (user_id, service, password) 
+		values ($1, $2, $3) 
+		ON CONFLICT (user_id, service) 
+		DO UPDATE SET password = excluded.password;`, user, service, pass)
 	tmp.Close()
 	return err
 }
 
 // получает из БД значения паролей
+// пароли сохраняются нешифрованными, т.к. это тестовое задание, но в целом это
+// очень плохо и в продакшене так делать нельзя
 func (b *Bot) Get(user int, service string) (string, error) {
 	pass := ""
 	err := b.db.QueryRow(context.Background(), "select password from passwords where user_id = $1 and service = $2 order by id desc limit 1", user, service).Scan(&pass)
@@ -106,14 +109,39 @@ func (b *Bot) Get(user int, service string) (string, error) {
 	return pass, nil
 }
 
+// получает из БД список сервисов
+func (b *Bot) GetList(user int) ([]string, error) {
+	rows, err := b.db.Query(context.Background(), "select service from passwords where user_id = $1", user)
+	if err != nil {
+		return []string{}, err
+	}
+	defer rows.Close()
+
+	services := []string{}
+
+	for rows.Next() {
+		servName := ""
+		err = rows.Scan(&servName)
+		if err != nil {
+			return []string{}, err
+		}
+		services = append(services, servName)
+	}
+
+	return services, nil
+}
+
 // удаляет из БД значения паролей
 func (b *Bot) Del(user int, service string) error {
-	rows, err := b.db.Query(context.Background(), "delete from passwords where user_id = $1 and service = $2", user, service)
+	rows, err := b.db.Query(context.Background(), "delete from passwords where user_id = $1 and service = $2 returning *", user, service)
 	if err != nil {
 		return err
 	}
-	rows.Close()
-	return nil
+	defer rows.Close()
+	if rows.Next() {
+		return nil
+	}
+	return fmt.Errorf("Nothing to delete")
 }
 
 func (b *Bot) DeleteMessage(chatId, messageId int) {
@@ -155,7 +183,7 @@ func (b *Bot) UpdateWebhook(w http.ResponseWriter, req *http.Request) {
 			fmt.Println("Cannot get chat id for message")
 		}
 
-		_, err := b.SendMessage(chatId, "Менеджер паролей \n Доступные команды: /set /get /del \n Формат ввода команд : \n /set service password \n /get service \n /del service", nil)
+		_, err := b.SendMessage(chatId, "Менеджер паролей \n Доступные команды: /set /get /del /list \n Формат ввода команд : \n /set service password \n /get service \n /del service \n /list", nil)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -207,6 +235,15 @@ func (b *Bot) UpdateWebhook(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		b.SendMessage(update.Message.Chat.Id, "Сервис "+messageParts[1]+" удалён ", nil)
+	} else if messageParts[0] == "/list" { // список сохраненных сервисов
+		servNames, err := b.GetList(update.Message.Chat.Id)
+		if err != nil {
+			fmt.Println(err)
+			b.SendMessage(update.Message.Chat.Id, "Ошибка при получении списка сервисов", nil)
+			return
+		}
+		text := fmt.Sprintf("Список сохраненных сервисов:\n%s", strings.Join(servNames, "\n"))
+		b.SendMessage(update.Message.Chat.Id, text, nil)
 	} else {
 		b.SendMessage(update.Message.Chat.Id, "Введите /start для запуска бота", nil)
 	}
