@@ -60,11 +60,12 @@ func main() {
 					tgbot.SendMessage(update.Message.Chat.Id, "Произошла ошибка при сохранении пароля. ", nil)
 					continue
 				}
-				_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Сохранён пароль для сервиса "+messageParts[1], nil)
+				answer, _ := tgbot.SendMessage(update.Message.Chat.Id, "Сохранён пароль для сервиса "+messageParts[1], nil)
+				go tgbot.DeleteMessage(update.Message.Chat.Id, answer.Message.MessageId)
+
 			} else if messageParts[0] == "/get" { // получаем пароль
 				if len(messageParts) != 2 {
-					answer, _ := tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
-					go tgbot.DeleteMessage(update.Message.Chat.Id, answer.Message.MessageId)
+					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
 					continue
 				}
 				val, err := tgbot.Get(update.Message.Chat.Id, messageParts[1])
