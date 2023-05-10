@@ -63,7 +63,8 @@ func main() {
 				_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Сохранён пароль для сервиса "+messageParts[1], nil)
 			} else if messageParts[0] == "/get" { // получаем пароль
 				if len(messageParts) != 2 {
-					_, _ = tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
+					answer, _ := tgbot.SendMessage(update.Message.Chat.Id, "Неверный формат команды", nil)
+					go tgbot.DeleteMessage(update.Message.Chat.Id, answer.Message.MessageId)
 					continue
 				}
 				val, err := tgbot.Get(update.Message.Chat.Id, messageParts[1])
