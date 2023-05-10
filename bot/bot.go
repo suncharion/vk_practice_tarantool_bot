@@ -35,7 +35,7 @@ func NewBot() *Bot {
 	}
 	bot.db = conn
 	fmt.Println("Database connection established")
-
+	в
 	return bot
 }
 
